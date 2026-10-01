@@ -1,0 +1,209 @@
+# Fork-only workflow (py-homelab/plezy): rebuilds the latest upstream release
+# with this fork's feature branches applied, signed with the fork's own key,
+# and publishes it as a `<tag>-tv` release. Not meant for upstream.
+name: TV build
+run-name: ${{ format('TV build {0}', inputs.tag || 'latest upstream release') }}
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Upstream tag to build; empty for the latest upstream release
+        default: ""
+        type: string
+      force:
+        description: Rebuild even if the release already exists
+        default: false
+        type: boolean
+
+env:
+  UPSTREAM_REPO: edde746/plezy
+  # Space-separated fork branches whose commits (since they diverged from
+  # upstream main) are applied on top of the upstream tag, in order.
+  FEATURE_BRANCHES: feat/launch-profile
+  # One marker per feature: once upstream contains it, that branch is skipped.
+  FEATURE_MARKERS: 'feat/launch-profile=android:host="profile"'
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: tv-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve upstream release
+        id: release
+        run: |
+          tag="${{ inputs.tag }}"
+          if [ -z "$tag" ]; then
+            tag=$(gh release view --repo "$UPSTREAM_REPO" --json tagName --jq .tagName)
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "tv_tag=$tag-tv" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.force }}" != "true" ] && gh release view "$tag-tv" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $tag-tv already exists; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.release.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Apply feature branches to the upstream tag
+        id: apply
+        if: steps.release.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/$UPSTREAM_REPO.git"
+          git fetch --quiet upstream main "refs/tags/$TAG:refs/tags/$TAG"
+          git checkout --quiet -b tv-build "refs/tags/$TAG"
+
+          applied=""
+          for branch in $FEATURE_BRANCHES; do
+            marker=""
+            for entry in $FEATURE_MARKERS; do
+              [ "${entry%%=*}" = "$branch" ] && marker="${entry#*=}"
+            done
+            if [ -n "$marker" ] && git grep -qF "$marker" HEAD -- android lib; then
+              echo "::notice::$TAG already contains $branch; skipping it."
+              echo "$branch" >> upstreamed.txt
+              continue
+            fi
+            git fetch --quiet origin "$branch"
+            base=$(git merge-base FETCH_HEAD upstream/main)
+            for commit in $(git rev-list --reverse "$base..FETCH_HEAD"); do
+              if git cherry-pick "$commit" >/dev/null; then continue; fi
+              conflicted=$(git diff --name-only --diff-filter=U)
+              # Generated translations are regenerated after all picks.
+              if echo "$conflicted" | grep -qvE '^lib/i18n/strings.*\.g\.dart$'; then
+                echo "::error::Cherry-picking $commit from $branch onto $TAG conflicts in: $conflicted. Rebase $branch onto upstream by hand."
+                exit 1
+              fi
+              git checkout --ours -- $conflicted
+              git add -- $conflicted
+              GIT_EDITOR=true git cherry-pick --continue
+            done
+            applied="$applied $branch"
+          done
+          echo "applied=${applied# }" >> "$GITHUB_OUTPUT"
+
+      - name: Report features now in upstream
+        if: steps.release.outputs.skip != 'true' && hashFiles('upstreamed.txt') != ''
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          for branch in $(cat upstreamed.txt); do
+            title="$branch is in upstream $TAG"
+            if [ -z "$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+                --body "Upstream $TAG already contains $branch. Remove it from FEATURE_BRANCHES in .github/workflows/tv-build.yml, and once no fork features remain, switch the TV back to upstream releases (this needs an uninstall: different signing key)."
+            fi
+          done
+
+      - name: Stop when nothing is left to apply
+        id: gate
+        if: steps.release.outputs.skip != 'true'
+        run: |
+          if [ -z "${{ steps.apply.outputs.applied }}" ]; then
+            echo "::notice::No fork features left to apply; not publishing a TV build."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Java
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Read upstream Flutter version
+        id: flutter
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        run: |
+          version=$(sed -nE 's/^ *FLUTTER_VERSION: *"([^"]+)".*/\1/p' .github/workflows/build.yml | head -1)
+          [ -n "$version" ] || { echo "::error::FLUTTER_VERSION not found in build.yml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Flutter
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          cache: true
+
+      - name: Cache Gradle
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: tv-${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Install dependencies and regenerate translations
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        run: |
+          flutter pub get --enforce-lockfile --no-example
+          dart run slang
+
+      - name: Configure signing
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TV_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.TV_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.TV_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TV_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::TV_KEYSTORE_BASE64 is not set; refusing to publish a debug-signed build."
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/tv-release.keystore
+          cat > android/key.properties << EOF
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=tv-release.keystore
+          EOF
+
+      - name: Build APKs
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        # The update check stays off: it points at upstream releases, which
+        # cannot install over this differently signed build.
+        run: >
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64
+          --dart-define=GIT_COMMIT=${{ github.sha }} --dart-define=ENABLE_DONATIONS=true
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f android/app/tv-release.keystore android/key.properties
+
+      - name: Publish release
+        if: steps.release.outputs.skip != 'true' && steps.gate.outputs.skip != 'true'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          TV_TAG: ${{ steps.release.outputs.tv_tag }}
+          APPLIED: ${{ steps.apply.outputs.applied }}
+        run: |
+          out=build/app/outputs/flutter-apk
+          cp "$out/app-armeabi-v7a-release.apk" "plezy-$TV_TAG-armeabi-v7a.apk"
+          cp "$out/app-arm64-v8a-release.apk" "plezy-$TV_TAG-arm64-v8a.apk"
+          notes="Upstream [$TAG](https://github.com/$UPSTREAM_REPO/releases/tag/$TAG) with: $APPLIED. Signed with the fork key; installs over earlier -tv builds only."
+          gh release delete "$TV_TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes >/dev/null 2>&1 || true
+          gh release create "$TV_TAG" --repo "$GITHUB_REPOSITORY" --target "${{ github.sha }}" \
+            --title "$TV_TAG" --notes "$notes" plezy-"$TV_TAG"-*.apk
