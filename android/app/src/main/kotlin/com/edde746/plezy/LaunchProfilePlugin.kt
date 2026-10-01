@@ -45,8 +45,7 @@ class LaunchProfilePlugin :
       }
     }
 
-    fun buildLinkUri(profileId: String): Uri =
-      Uri.Builder().scheme("plezy").authority(HOST).appendQueryParameter("id", profileId).build()
+    fun buildLinkUri(profileId: String): Uri = Uri.Builder().scheme("plezy").authority(HOST).appendQueryParameter("id", profileId).build()
   }
 
   private lateinit var methodChannel: MethodChannel
