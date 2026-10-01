@@ -10,6 +10,7 @@ import '../focus/key_event_utils.dart';
 import '../media/ids.dart';
 import '../media/media_server_client.dart';
 import '../profiles/active_profile_provider.dart';
+import '../profiles/launch_profile_activation.dart';
 import '../profiles/plex_home_service.dart';
 import '../profiles/profile_connection_registry.dart';
 import '../providers/catalog_sources_provider.dart';
@@ -29,6 +30,7 @@ import '../screens/video_player_screen.dart';
 import '../services/api_cache.dart';
 import '../services/agent_control_service.dart';
 import '../services/catalog/catalog_library_matcher.dart';
+import '../services/launch_profile_service.dart';
 import '../services/music/music_playback_service.dart';
 import '../services/music/music_playback_service_impl.dart';
 import '../services/music/music_session_store.dart';
@@ -102,9 +104,35 @@ class _ProfileSessionScreenState extends State<ProfileSessionScreen> {
   @override
   void initState() {
     super.initState();
+    LaunchProfileService().onProfileLink = _onLaunchProfileLink;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _hasBuiltSession = true;
+      if (!mounted) return;
+      _hasBuiltSession = true;
+      // A profile link that arrived while setup was still running stayed
+      // pending natively; apply it now that a session can switch.
+      unawaited(_applyPendingLaunchProfile());
     });
+  }
+
+  @override
+  void dispose() {
+    final launchProfile = LaunchProfileService();
+    if (launchProfile.onProfileLink == _onLaunchProfileLink) launchProfile.onProfileLink = null;
+    super.dispose();
+  }
+
+  Future<void> _applyPendingLaunchProfile() async {
+    final request = await LaunchProfileService().takeInitialRequest();
+    if (request == null || !mounted) return;
+    await activateLaunchProfile(context, request);
+  }
+
+  /// Warm-start `plezy://profile` link. This route outlives the profile
+  /// subtree the switch remounts, so its context stays valid throughout.
+  Future<bool> _onLaunchProfileLink(LaunchProfileRequest request) async {
+    if (!mounted) return false;
+    unawaited(activateLaunchProfile(context, request));
+    return true;
   }
 
   /// The keyed remount below recreates every session-scoped provider on a

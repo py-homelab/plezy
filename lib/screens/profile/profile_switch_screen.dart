@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:provider/provider.dart';
 
@@ -16,7 +18,9 @@ import '../../profiles/profile_avatar.dart';
 import '../../profiles/profile_connection.dart';
 import '../../profiles/profile_merge.dart';
 import '../../services/app_exit_service.dart';
+import '../../services/launch_profile_service.dart';
 import '../../theme/mono_tokens.dart';
+import '../../utils/snackbar_helper.dart';
 import '../../widgets/app_icon.dart';
 import '../../widgets/app_menu.dart';
 import '../../widgets/backend_badge.dart';
@@ -50,6 +54,17 @@ class _ProfileSwitchScreenState extends State<ProfileSwitchScreen> with MountedS
   final Map<String, FocusNode> _profileMenuFocusNodes = {};
   final Map<String, GlobalKey<AppMenuButtonState<_TileAction>>> _profileMenuKeys = {};
   bool _switching = false;
+  bool _canPinShortcuts = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(
+      LaunchProfileService().isPinShortcutSupported().then((supported) {
+        if (supported) setStateIfMounted(() => _canPinShortcuts = true);
+      }),
+    );
+  }
 
   @override
   void dispose() {
@@ -213,7 +228,8 @@ class _ProfileSwitchScreenState extends State<ProfileSwitchScreen> with MountedS
           final onSignOut = profile.isPlexHome && profile.parentConnectionId != null && actionsEnabled
               ? () => _signOutPlexAccount(profile)
               : null;
-          final hasMenu = onManage != null || onDelete != null || onSignOut != null;
+          final onAddShortcut = _canPinShortcuts && actionsEnabled ? () => _addHomeScreenShortcut(profile) : null;
+          final hasMenu = onManage != null || onDelete != null || onSignOut != null || onAddShortcut != null;
 
           return Padding(
             key: ValueKey(profile.id),
@@ -248,6 +264,7 @@ class _ProfileSwitchScreenState extends State<ProfileSwitchScreen> with MountedS
                   onManage: onManage,
                   onDelete: onDelete,
                   onSignOut: onSignOut,
+                  onAddShortcut: onAddShortcut,
                   menuFocusNode: menuFocusNode,
                   menuKey: menuKey,
                   onMenuNavigateLeft: () => profileFocusNode.requestFocus(),
@@ -378,6 +395,31 @@ class _ProfileSwitchScreenState extends State<ProfileSwitchScreen> with MountedS
     await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => const AddLocalProfileScreen()));
   }
 
+  /// Pins a launcher shortcut that opens the app as [profile] (Android).
+  Future<void> _addHomeScreenShortcut(Profile profile) async {
+    final avatarUrl = context.read<ActiveProfileProvider>().avatarUrlFor(profile.id);
+    final thumb = avatarUrl != null && avatarUrl.isNotEmpty ? avatarUrl : profile.avatarThumbUrl;
+    final icon = thumb == null || thumb.isEmpty ? null : await _fetchShortcutIcon(thumb);
+    final requested = await LaunchProfileService().requestPinShortcut(
+      profile,
+      label: t.profiles.homeScreenShortcutLabel(displayName: profile.displayName),
+      icon: icon,
+    );
+    if (!requested && mounted) showErrorSnackBar(context, t.profiles.addToHomeScreenFailed);
+  }
+
+  /// Best effort: the shortcut falls back to the app icon without it.
+  Future<Uint8List?> _fetchShortcutIcon(String url) async {
+    try {
+      final response = await http
+          .get(Uri.parse(url), headers: const {'User-Agent': 'Plezy'})
+          .timeout(const Duration(seconds: 5));
+      return response.statusCode == 200 ? response.bodyBytes : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _switchTo(Profile profile) async {
     if (_switching) return;
     setState(() => _switching = true);
@@ -413,6 +455,7 @@ class _ProfileTile extends StatelessWidget {
   final VoidCallback? onManage;
   final VoidCallback? onDelete;
   final VoidCallback? onSignOut;
+  final VoidCallback? onAddShortcut;
   final FocusNode menuFocusNode;
   final GlobalKey<AppMenuButtonState<_TileAction>> menuKey;
   final VoidCallback onMenuNavigateLeft;
@@ -428,6 +471,7 @@ class _ProfileTile extends StatelessWidget {
     this.onManage,
     this.onDelete,
     this.onSignOut,
+    this.onAddShortcut,
     required this.menuFocusNode,
     required this.menuKey,
     required this.onMenuNavigateLeft,
@@ -436,7 +480,7 @@ class _ProfileTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final hasMenu = onManage != null || onDelete != null || onSignOut != null;
+    final hasMenu = onManage != null || onDelete != null || onSignOut != null || onAddShortcut != null;
     return InkWell(
       canRequestFocus: false,
       onTap: isActive ? null : onTap,
@@ -484,6 +528,7 @@ class _ProfileTile extends StatelessWidget {
                 onSelected: _handleAction,
                 actions: [
                   if (onManage != null) _TileAction.manage,
+                  if (onAddShortcut != null) _TileAction.addToHomeScreen,
                   if (onDelete != null) _TileAction.delete,
                   if (onSignOut != null) _TileAction.signOut,
                 ],
@@ -507,6 +552,9 @@ class _ProfileTile extends StatelessWidget {
           break;
         case _TileAction.signOut:
           onSignOut?.call();
+          break;
+        case _TileAction.addToHomeScreen:
+          onAddShortcut?.call();
           break;
       }
     });
@@ -549,11 +597,12 @@ extension _TileActionLabel on _TileAction {
       _TileAction.manage => t.profiles.manage,
       _TileAction.delete => t.profiles.delete,
       _TileAction.signOut => t.profiles.signOut,
+      _TileAction.addToHomeScreen => t.profiles.addToHomeScreen,
     };
   }
 }
 
-enum _TileAction { manage, delete, signOut }
+enum _TileAction { manage, addToHomeScreen, delete, signOut }
 
 class _ConnectionChips extends StatelessWidget {
   final List<_ChipData> chips;

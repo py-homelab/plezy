@@ -79,6 +79,13 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="plezy" android:host="live"/>
             </intent-filter>
+            <!-- Deep link for opening the app as a profile: plezy://profile?id=...|name=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="plezy" android:host="profile"/>
+            </intent-filter>
         </activity>
         <provider
             android:name="androidx.core.content.FileProvider"

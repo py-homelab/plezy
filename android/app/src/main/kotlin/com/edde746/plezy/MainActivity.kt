@@ -106,6 +106,7 @@ class MainActivity : FlutterActivity() {
   private val CAR_RESTRICTIONS_CHANNEL = "com.plezy/car_restrictions"
   private val ASSISTIVE_TECHNOLOGY_CHANNEL = "com.plezy/assistive_technology"
   private var watchNextPlugin: WatchNextPlugin? = null
+  private var launchProfilePlugin: LaunchProfilePlugin? = null
   private var carRestrictions: CarRestrictionsMonitor? = null
   private var carRestrictionsChannel: MethodChannel? = null
   private var assistiveTechnology: AssistiveTechnologyMonitor? = null
@@ -574,6 +575,7 @@ class MainActivity : FlutterActivity() {
     val launchedFromHistory = (intent?.flags ?: 0) and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
     if (savedInstanceState == null && !launchedFromHistory) {
       handleWatchNextIntent(intent)
+      handleLaunchProfileIntent(intent)
     }
   }
 
@@ -581,6 +583,7 @@ class MainActivity : FlutterActivity() {
     super.onNewIntent(intent)
     // Handle Watch Next deep link when app is already running
     handleWatchNextIntent(intent)
+    handleLaunchProfileIntent(intent)
   }
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -628,6 +631,10 @@ class MainActivity : FlutterActivity() {
       // Notify the plugin to send event to Flutter
       watchNextPlugin?.notifyDeepLink(contentId)
     }
+  }
+
+  private fun handleLaunchProfileIntent(intent: Intent?) {
+    LaunchProfilePlugin.handleIntent(intent)?.let { launchProfilePlugin?.notifyProfileLink(it) }
   }
 
   // Connects the car UX-restriction monitor on first use, retrying while the platform signal is
@@ -978,6 +985,9 @@ class MainActivity : FlutterActivity() {
     // Register Watch Next plugin and keep reference for deep link handling
     watchNextPlugin = WatchNextPlugin()
     flutterEngine.plugins.add(watchNextPlugin!!)
+
+    launchProfilePlugin = LaunchProfilePlugin()
+    flutterEngine.plugins.add(launchProfilePlugin!!)
 
     MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PIP_CHANNEL).setMethodCallHandler { call, result ->
       when (call.method) {

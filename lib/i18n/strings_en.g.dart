@@ -2692,6 +2692,15 @@ class Translations$profiles$en {
 	/// en: 'Sign out'
 	String get signOut => 'Sign out';
 
+	/// en: 'Add to home screen'
+	String get addToHomeScreen => 'Add to home screen';
+
+	/// en: 'Couldn't add the shortcut to the home screen'
+	String get addToHomeScreenFailed => 'Couldn\'t add the shortcut to the home screen';
+
+	/// en: 'Plezy · ${displayName}'
+	String homeScreenShortcutLabel({required Object displayName}) => 'Plezy · ${displayName}';
+
 	/// en: 'Sign out of Plex?'
 	String get signOutPlexTitle => 'Sign out of Plex?';
 
@@ -8174,6 +8183,9 @@ extension on Translations {
 			'profiles.manage' => 'Manage',
 			'profiles.delete' => 'Delete',
 			'profiles.signOut' => 'Sign out',
+			'profiles.addToHomeScreen' => 'Add to home screen',
+			'profiles.addToHomeScreenFailed' => 'Couldn\'t add the shortcut to the home screen',
+			'profiles.homeScreenShortcutLabel' => ({required Object displayName}) => 'Plezy · ${displayName}',
 			'profiles.signOutPlexTitle' => 'Sign out of Plex?',
 			'profiles.signOutPlexMessage' => ({required Object displayName}) => 'Remove ${displayName} and all Plex Home users? Sign back in anytime.',
 			'profiles.signOutPlexDeleteDownloads' => 'Also delete downloads',
@@ -8339,11 +8351,11 @@ extension on Translations {
 			'errors.reasonTimedOut' => 'the connection timed out',
 			'errors.reasonUnreachable' => 'the server could not be reached',
 			'errors.reasonRefused' => 'the server refused the request',
+			_ => null,
+		} ?? switch (path) {
 			'errors.reasonNotFound' => 'the item is no longer on the server',
 			'errors.reasonServerError' => 'the server reported an error',
 			'errors.reasonCancelled' => 'the request was cancelled',
-			_ => null,
-		} ?? switch (path) {
 			'errors.reasonUnexpected' => 'an unexpected error occurred',
 			'libraries.title' => 'Libraries',
 			'libraries.fallbackTitle' => 'Library',
@@ -8853,11 +8865,11 @@ extension on Translations {
 			'watchTogether.youAreNowHost' => 'You are now the host',
 			'watchTogether.hostTransferFailed' => ({required Object name}) => 'Couldn\'t make ${name} the host',
 			'watchTogether.watchingWithOthers' => 'Watching with others',
+			_ => null,
+		} ?? switch (path) {
 			'watchTogether.endSession' => 'End Session',
 			'watchTogether.leaveSession' => 'Leave Session',
 			'watchTogether.endSessionQuestion' => 'End Session?',
-			_ => null,
-		} ?? switch (path) {
 			'watchTogether.leaveSessionQuestion' => 'Leave Session?',
 			'watchTogether.endSessionConfirm' => 'This will end the session for all participants.',
 			'watchTogether.leaveSessionConfirm' => 'You will be removed from the session.',
@@ -9367,11 +9379,11 @@ extension on Translations {
 			'services.oauthProxy.openToSignIn' => ({required Object service}) => 'Open ${service} to sign in',
 			'services.pendingAuth.copyUrl' => 'Copy sign-in URL',
 			'services.pendingAuth.urlCopied' => 'URL copied',
+			_ => null,
+		} ?? switch (path) {
 			'services.libraryFilter.title' => 'Library filter',
 			'services.libraryFilter.subtitleAllSyncing' => 'Syncing all libraries',
 			'services.libraryFilter.subtitleNoneSyncing' => 'Nothing syncing',
-			_ => null,
-		} ?? switch (path) {
 			'services.libraryFilter.subtitleBlocked' => ({required Object count}) => '${count} blocked',
 			'services.libraryFilter.subtitleAllowed' => ({required Object count}) => '${count} allowed',
 			'services.libraryFilter.mode' => 'Filter mode',

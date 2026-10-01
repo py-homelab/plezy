@@ -20,6 +20,7 @@ import 'navigation/profile_navigation_scope.dart';
 import 'navigation/profile_session_screen.dart';
 import 'profiles/active_profile_binder.dart';
 import 'profiles/active_profile_provider.dart';
+import 'profiles/launch_profile_activation.dart';
 import 'profiles/profile.dart';
 import 'profiles/profile_connection_cleanup.dart';
 import 'profiles/profile_connection_registry.dart';
@@ -74,6 +75,7 @@ import 'services/download_storage_service.dart';
 import 'services/connectivity_probe.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'services/jellyfin_api_cache.dart';
+import 'services/launch_profile_service.dart';
 import 'services/plex_api_cache.dart';
 import 'database/app_database.dart';
 import 'database/download_operations.dart';
@@ -2207,6 +2209,16 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.bindingStarted);
     binder.start(allowInitialPinPrompt: hasNetwork);
 
+    // A `plezy://profile` link (launcher shortcut, automation) picks the
+    // profile itself, so it stands in for the launch picker.
+    var launchedAsProfile = false;
+    final launchRequest = await LaunchProfileService().takeInitialRequest();
+    if (!mounted) return;
+    if (launchRequest != null) {
+      launchedAsProfile = await activateLaunchProfile(context, launchRequest);
+      if (!mounted) return;
+    }
+
     // If "prompt for profile on launch" is on (or no profile is selected
     // yet), surface the picker BEFORE waiting for the previously-active
     // profile's bind to settle — otherwise the user sees the splash fully
@@ -2216,7 +2228,7 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     final settings = await SettingsService.getInstance();
     if (!mounted) return;
     final hasNoActive = activeProfile.active == null && activeProfile.profiles.isNotEmpty;
-    final shouldPrompt = hasNoActive || activeProfile.requiresSelectionOnOpen(settings);
+    final shouldPrompt = !launchedAsProfile && (hasNoActive || activeProfile.requiresSelectionOnOpen(settings));
 
     var bindingSucceeded = activeProfile.lastBindingSucceeded;
     if (shouldPrompt) {
@@ -2254,7 +2266,12 @@ class _SetupScreenState extends State<SetupScreen> with MountedSetStateMixin {
     if (!mounted) return;
 
     AndroidExitDiagnostics.markStartupPhase(AndroidStartupPhase.mainScreen);
-    unawaited(Navigator.pushReplacement(context, fadeRoute(ProfileSessionScreen(initialPromptHandled: shouldPrompt))));
+    unawaited(
+      Navigator.pushReplacement(
+        context,
+        fadeRoute(ProfileSessionScreen(initialPromptHandled: shouldPrompt || launchedAsProfile)),
+      ),
+    );
   }
 
   /// Wire per-server status updates from [MultiServerManager] into the
